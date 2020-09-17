@@ -1,0 +1,6 @@
+julia
+Julia Packages: 
+  Lints 
+  LinearAlgebra
+  TensorOperations
+  Test
