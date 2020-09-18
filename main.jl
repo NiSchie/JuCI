@@ -3,6 +3,7 @@ include("physconsts.jl")
 using Lints
 using LinearAlgebra
 using TensorOperations
+using LoopVectorization
 using Test
 
 using .PhysConsts
@@ -10,6 +11,9 @@ using .PhysConsts
 leri4 = false
 lDFdebug = false
 molfile="mol.xyz"
+
+Ethr = 1.0E-6
+Dthr = 1.0E-6
 
 struct molecule
   nat::Int
@@ -37,11 +41,23 @@ for i = 1:nat
   charg[i] = get(PhysConsts.atlist,splitline[1],0)
   popat!(splitline,1)
   coord .= parse.(Float64,splitline)
-  pos[i,:] = collect(coord)
+  pos[i,:] = collect(coord) 
 end
-nocc = sum(charg)
+println("Coordinates")
+display(pos)
+
+nocc = Int(sum(charg)/2)
 mol = molecule(nat,lines[2],pos,charg)
 
+Vnuc = 0.0
+for i in 1:nat, j in 1:(i-1)
+  global Vnuc
+  x = mol.coords[i,1] - mol.coords[j,1]
+  y = mol.coords[i,2] - mol.coords[j,2]
+  z = mol.coords[i,3] - mol.coords[j,3]
+  Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z)*PhysConsts.angstrom_to_bohr)
+end
+println("Vnuc: ",Vnuc)
 
 @lints begin
 
@@ -53,8 +69,8 @@ mol = molecule(nat,lines[2],pos,charg)
 
   println(" ")
   println("Constructing basis")
-  bas = Lints.BasisSet("CC-PVDZ",lintmol)
-  bas_df = Lints.BasisSet("CC-PVDZ-RIFIT",lintmol)
+  bas = Lints.BasisSet("cc-pVDZ",lintmol)
+  bas_df = Lints.BasisSet("cc-pVDZ-RIFIT",lintmol)
   println("Successfully constructed basis")
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
@@ -63,6 +79,7 @@ mol = molecule(nat,lines[2],pos,charg)
   if leri4 == true
     println("Generating eri4\n")
     mnkl = Lints.make_ERI4(bas)
+    println("done.\n")
   end #if leri4
 
   println("\n Dimensions of (P|Q):",size(PQ))
@@ -104,6 +121,9 @@ mol = molecule(nat,lines[2],pos,charg)
     println("done.\n")
   end #if leri4
 
+end #lints
+
+  nao = size(S,1)
   nmo = size(S,1)
   nvir = nmo - nocc
   println("\n nMO:",nmo)
@@ -117,14 +137,82 @@ mol = molecule(nat,lines[2],pos,charg)
   println("done.")
   H  = T + V
   F  = Array{Float64,2}(undef, nmo,nmo)
-  F .= H
+  F  .= H 
   Ft = Sh*F*transpose(Sh) 
+  Ftinit = deepcopy(Ft)
 
   #diagonalize Ft
-  eps,Ct = eigen(Hermitian(Ft))
+  eps,Ctinit = eigen(Hermitian(Ft))
 
   #transform Ct with Sh to get MO-coefficients
-  C = Sh*Ct
+  Cinit = Sh*Ctinit
+
+  Cocc = Cinit[:,1:nocc]
+  @tensor Dao[m,n] := Cocc[m,p] * Cocc[n,p] 
+  Dold = deepcopy(Dao)
+
+  Daoold   = deepcopy(Dao)
+  epsold = deepcopy(eps)
+  Cold   = deepcopy(Cinit)
+
+  ite = 1
+  E = 0.0
+  dE = 1.0
+  Eold = 1.0E20
+  Drms = 1.0
+  #diis = false
+  #damp = 0.0
+  converged = false
+
+  maxit = 300
+  #RHF LOOP
+  while ite < maxit
+    println("\nHF Iteration : $ite")
+    global Ft,Dold,Eold,dE,Drms,Vnuc
+
+    #Get new orb energies and coeff
+    eps,Ct = eigen(Hermitian(real.(Ft)))
+    C = Sh * Ct
+
+    #new density matrix
+    Cocc = C[:,1:nocc]
+    @tensor Dao[m,n] := Cocc[m,p] * Cocc[n,p]
+    if ite > 1
+      dD = Dao - Dold
+      Drms = sqrt(sum(dD.^2))
+      println("Drms: ",Drms)
+    end
+    Dold = deepcopy(Dao)
+
+    #Build the Fock matrix
+    #println("Building the new Fock matrix...")
+    @tensor F[m,n] = H[m,n] + Dao[k,l]*( (Bmn[P,m,n]*Bmn[P,k,l]) - 0.5*(Bmn[Q,m,l]*Bmn[Q,k,n]) )
+    #@tensor begin
+    #  #F[m,n] = H[m,n]
+    #  G[m,n] := Dao[k,l] * (Bmn[Q,m,n]*Bmn[Q,k,l])
+    #  G[m,n] = G[m,n] - 0.5 * (Dao[k,l] * (Bmn[Q,m,l]*Bmn[Q,k,n]))
+    #  F[m,n] = H[m,n] + G[m,n]
+    #end
+    
+    #println("done.\n")
+    Ft = Sh*F*transpose(Sh)
 
 
-end #lints
+    #E = 0.5*sum(Dao .* (T+V .+ F))
+    @tensor E = Dao[m,n] * ( T[n,m]+V[n,m] + F[n,m] )
+    if ite > 1
+      dE = E - Eold
+    end
+    Eold = E
+    println("HF Energy: ",E+Vnuc," Difference: ",dE, "Electronic Energy: ",E)
+
+    if (abs(dE) < Ethr) & (Drms < Dthr) & (ite > 5)
+      converged = true
+      break
+    end
+
+    global ite +=1
+  end #ite < maxit
+
+  println("\nTM reference energy: -76.01678545283")
+
