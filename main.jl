@@ -41,10 +41,11 @@ for i = 1:nat
   charg[i] = get(PhysConsts.atlist,splitline[1],0)
   popat!(splitline,1)
   coord .= parse.(Float64,splitline)
-  pos[i,:] = collect(coord) 
+  pos[i,:] = collect(coord) * PhysConsts.angstrom_to_bohr
 end
 println("Coordinates")
 display(pos)
+println("")
 
 nocc = Int(sum(charg)/2)
 mol = molecule(nat,lines[2],pos,charg)
@@ -55,14 +56,14 @@ for i in 1:nat, j in 1:(i-1)
   x = mol.coords[i,1] - mol.coords[j,1]
   y = mol.coords[i,2] - mol.coords[j,2]
   z = mol.coords[i,3] - mol.coords[j,3]
-  Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z)*PhysConsts.angstrom_to_bohr)
+  Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z))
 end
 println("Vnuc: ",Vnuc)
 
 @lints begin
 
   t_coord = Array{Array{Float64,1}}
-  t_coord = [mol.coords[i,:] for i in 1:size(mol.coords,1)]
+  t_coord = [mol.coords[i,:]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,1)]
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
   println("Done reading molecule")
@@ -135,25 +136,18 @@ end #lints
   println("Building S^{-1/2}...")
   Sh = S^(-1/2)
   println("done.")
-  H  = T + V
-  F  = Array{Float64,2}(undef, nmo,nmo)
-  F  .= H 
-  Ft = Sh*F*transpose(Sh) 
-  Ftinit = deepcopy(Ft)
+  H  = T .+ V
+  F  = deepcopy(H) 
+  Ftinit = Sh*F*transpose(Sh) 
 
   #diagonalize Ft
-  eps,Ctinit = eigen(Hermitian(Ft))
+  eps,Ctinit = eigen(Hermitian(Ftinit))
 
   #transform Ct with Sh to get MO-coefficients
   Cinit = Sh*Ctinit
 
   Cocc = Cinit[:,1:nocc]
-  @tensor Dao[m,n] := Cocc[m,p] * Cocc[n,p] 
-  Dold = deepcopy(Dao)
-
-  Daoold   = deepcopy(Dao)
-  epsold = deepcopy(eps)
-  Cold   = deepcopy(Cinit)
+  @tensor Dold[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p] 
 
   ite = 1
   E = 0.0
@@ -164,47 +158,56 @@ end #lints
   #damp = 0.0
   converged = false
 
-  maxit = 300
+  Dao = zeros(nao,nao)
+  F   = zeros(nao,nao)
+
+  maxit = 100
   #RHF LOOP
+  Ftit = zeros(nao,nao)
   while ite < maxit
     println("\nHF Iteration : $ite")
-    global Ft,Dold,Eold,dE,Drms,Vnuc
+    global Ftinit,Dold,Eold,dE,Drms,Vnuc,Ftit
+    global eps,Cocc,Dao,F,E,converged,F
+
+    if ite == 1
+      Ftit = deepcopy(Ftinit)
+    end
 
     #Get new orb energies and coeff
-    eps,Ct = eigen(Hermitian(real.(Ft)))
+    eps,Ct = eigen(Hermitian(real.(Ftit)))
     C = Sh * Ct
 
     #new density matrix
     Cocc = C[:,1:nocc]
-    @tensor Dao[m,n] := Cocc[m,p] * Cocc[n,p]
-    if ite > 1
-      dD = Dao - Dold
-      Drms = sqrt(sum(dD.^2))
-      println("Drms: ",Drms)
-    end
+    @tensor Dao[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p]
+    dD = Dao .- Dold
+    Drms = sqrt(sum(dD.^2))
+    println("Drms: ",Drms)
+    println("Dao:  ",sum(Dao))
+    println("Dold: ",sum(Dold))
     Dold = deepcopy(Dao)
 
     #Build the Fock matrix
     #println("Building the new Fock matrix...")
     @tensor F[m,n] = H[m,n] + Dao[k,l]*( (Bmn[P,m,n]*Bmn[P,k,l]) - 0.5*(Bmn[Q,m,l]*Bmn[Q,k,n]) )
     #@tensor begin
-    #  #F[m,n] = H[m,n]
     #  G[m,n] := Dao[k,l] * (Bmn[Q,m,n]*Bmn[Q,k,l])
     #  G[m,n] = G[m,n] - 0.5 * (Dao[k,l] * (Bmn[Q,m,l]*Bmn[Q,k,n]))
     #  F[m,n] = H[m,n] + G[m,n]
     #end
     
     #println("done.\n")
-    Ft = Sh*F*transpose(Sh)
+    Ftit = Sh*F*transpose(Sh)
 
 
-    #E = 0.5*sum(Dao .* (T+V .+ F))
-    @tensor E = Dao[m,n] * ( T[n,m]+V[n,m] + F[n,m] )
+    E = 0.5*sum(Dao .* ( H .+ F ))
     if ite > 1
       dE = E - Eold
     end
     Eold = E
-    println("HF Energy: ",E+Vnuc," Difference: ",dE, "Electronic Energy: ",E)
+    println("HF Energy:         ",E+Vnuc)
+    println("Energy Difference: ",dE)
+    println("Electronic Energy: ",E)
 
     if (abs(dE) < Ethr) & (Drms < Dthr) & (ite > 5)
       converged = true
