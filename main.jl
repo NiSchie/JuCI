@@ -5,6 +5,7 @@ using LinearAlgebra
 using TensorOperations
 using LoopVectorization
 using Test
+using Printf
 
 using .PhysConsts
 
@@ -43,7 +44,7 @@ for i = 1:nat
   coord .= parse.(Float64,splitline)
   pos[i,:] = collect(coord) * PhysConsts.angstrom_to_bohr
 end
-println("Coordinates")
+println("Coordinates in bohr:\n")
 display(pos)
 println("")
 
@@ -58,21 +59,25 @@ for i in 1:nat, j in 1:(i-1)
   z = mol.coords[i,3] - mol.coords[j,3]
   Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z))
 end
-println("Vnuc: ",Vnuc)
+println("\nVnuc: ",Vnuc)
 
 @lints begin
+
+  using Printf
 
   t_coord = Array{Array{Float64,1}}
   t_coord = [mol.coords[i,:]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,1)]
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
-  println("Done reading molecule")
 
   println(" ")
   println("Constructing basis")
-  bas = Lints.BasisSet("cc-pVDZ",lintmol)
-  bas_df = Lints.BasisSet("cc-pVDZ-RIFIT",lintmol)
-  println("Successfully constructed basis")
+  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVDZ",lintmol)
+  @printf("Time needed to construct basis:  %.4f s",timingstring)
+  @printf("\n")
+  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVDZ-RIFIT",lintmol)
+  @printf("Time needed to construct DF basis: %.4f s",timingstring)
+  @printf("\n")
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
   PQ  = Lints.make_ERI2(bas_df)
@@ -163,9 +168,11 @@ end #lints
 
   maxit = 100
   #RHF LOOP
+  hfenfile=open("hf_energy","a+")
   Ftit = zeros(nao,nao)
+  println("HF It.  |  HF-Energy  |    dE    |   dD  ")
+  println("-----------------------------------------")
   while ite < maxit
-    println("\nHF Iteration : $ite")
     global Ftinit,Dold,Eold,dE,Drms,Vnuc,Ftit
     global eps,Cocc,Dao,F,E,converged,F
 
@@ -182,9 +189,6 @@ end #lints
     @tensor Dao[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p]
     dD = Dao .- Dold
     Drms = sqrt(sum(dD.^2))
-    println("Drms: ",Drms)
-    println("Dao:  ",sum(Dao))
-    println("Dold: ",sum(Dold))
     Dold = deepcopy(Dao)
 
     #Build the Fock matrix
@@ -205,9 +209,11 @@ end #lints
       dE = E - Eold
     end
     Eold = E
-    println("HF Energy:         ",E+Vnuc)
-    println("Energy Difference: ",dE)
-    println("Electronic Energy: ",E)
+    #println("HF Energy:         ",E+Vnuc)
+    #println("Energy Difference: ",dE)
+    @printf("  %3d   |  %.5f | %.2e | %.2e\n",ite,E+Vnuc,dE,Drms)
+    s = @sprintf("  %3d    %.5f  %.20f  %.20f\n",ite,E+Vnuc,dE,Drms)
+    write(hfenfile,s)
 
     if (abs(dE) < Ethr) & (Drms < Dthr) & (ite > 5)
       converged = true
@@ -217,5 +223,4 @@ end #lints
     global ite +=1
   end #ite < maxit
 
-  println("\nTM reference energy: -76.01678545283")
-
+  close(hfenfile)
