@@ -9,57 +9,59 @@ using Printf
 
 using .PhysConsts
 
-leri4 = false
-lDFdebug = false
-molfile="mol.xyz"
 
-Ethr = 1.0E-6
-Dthr = 1.0E-6
 
-struct molecule
-  nat::Int
-  nam::String
-  coords::Matrix{Float64}
-  atchrg::Vector{Int}
-end
-
-#Read in molecule and set up basis sets
-
-println("Reading in the molecule")
-if isfile(molfile)
-  lines = readlines(molfile)
-else
-end
-
-nat = parse(Int,lines[1])
-
-pos   = zeros(Float64,nat,3)
-charg = Array{Int}(undef,nat)
-
-coord = [0.0, 0.0, 0.0]
-for i = 1:nat
-  splitline = split(lines[i+2]," ")
-  charg[i] = get(PhysConsts.atlist,splitline[1],0)
-  popat!(splitline,1)
-  coord .= parse.(Float64,splitline)
-  pos[i,:] = collect(coord) * PhysConsts.angstrom_to_bohr
-end
-println("Coordinates in bohr:\n")
-display(pos)
-println("")
-
-nocc = Int(sum(charg)/2)
-mol = molecule(nat,lines[2],pos,charg)
-
-Vnuc = 0.0
-for i in 1:nat, j in 1:(i-1)
-  global Vnuc
-  x = mol.coords[i,1] - mol.coords[j,1]
-  y = mol.coords[i,2] - mol.coords[j,2]
-  z = mol.coords[i,3] - mol.coords[j,3]
-  Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z))
-end
-println("\nVnuc: ",Vnuc)
+  leri4 = false
+  lDFdebug = false
+  molfile="mol.xyz"
+  
+  Ethr = 1.0E-6
+  Dthr = 1.0E-6
+  
+  struct molecule
+    nat::Int
+    nam::String
+    coords::Matrix{Float64}
+    atchrg::Vector{Int}
+  end
+  
+  #Read in molecule and set up basis sets
+  
+  @printf("Reading in the molecule\n")
+  if isfile(molfile)
+    lines = readlines(molfile)
+  else
+    throw("Molecule file not found")
+  end
+  
+  nat = parse(Int,lines[1])
+  
+  pos   = zeros(Float64,nat,3)
+  charg = Array{Int}(undef,nat)
+  
+  coord = [0.0, 0.0, 0.0]
+  for i = 1:nat
+    splitline = split(lines[i+2]," ")
+    charg[i] = get(PhysConsts.atlist,splitline[1],0)
+    popat!(splitline,1)
+    coord .= parse.(Float64,splitline)
+    pos[i,:] = collect(coord) * PhysConsts.angstrom_to_bohr
+  end
+  @printf("Coordinates in bohr:\n")
+  display(pos)
+  
+  nocc = Int(sum(charg)/2)
+  mol = molecule(nat,lines[2],pos,charg)
+  
+  Vnuc = 0.0
+  for i in 1:nat, j in 1:(i-1)
+    global Vnuc
+    x = mol.coords[i,1] - mol.coords[j,1]
+    y = mol.coords[i,2] - mol.coords[j,2]
+    z = mol.coords[i,3] - mol.coords[j,3]
+    Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z))
+  end
+  @printf("\nVnuc: %.5f\n\n",Vnuc)
 
 @lints begin
 
@@ -70,77 +72,59 @@ println("\nVnuc: ",Vnuc)
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
 
-  println(" ")
-  println("Constructing basis")
   timingstring=@elapsed bas    = Lints.BasisSet("cc-pVDZ",lintmol)
-  @printf("Time needed to construct basis:  %.4f s",timingstring)
-  @printf("\n")
+  @printf("Time needed to construct basis:         %.4f s\n",timingstring)
   timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVDZ-RIFIT",lintmol)
-  @printf("Time needed to construct DF basis: %.4f s",timingstring)
-  @printf("\n")
+  @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
-  PQ  = Lints.make_ERI2(bas_df)
-  Pmn = Lints.make_ERI3(bas,bas_df)
+  timingstring=@elapsed PQ  = Lints.make_ERI2(bas_df)
+  @printf("Time needed to construct ERI2:          %.4f s\n",timingstring)
+  timingstring=@elapsed Pmn = Lints.make_ERI3(bas,bas_df)
+  @printf("Time needed to construct ERI3:          %.4f s\n",timingstring)
   if leri4 == true
-    println("Generating eri4\n")
-    mnkl = Lints.make_ERI4(bas)
-    println("done.\n")
+    timingstring=@elapsed mnkl = Lints.make_ERI4(bas)
+    @printf("Time needed to construct ERI4:          %.4f s\n",timingstring)
   end #if leri4
-
-  println("\n Dimensions of (P|Q):",size(PQ))
-  println("Dimensions of (P|mn):",size(Pmn))
-  if leri4 == true
-    println("Size of (mn|kl):",size(mnkl))
-  end #if leri4
-  println("")
 
   #build inverse  (P|Q)^{-1/2}
-  println("Building (P|Q)^{-1/2}...")
-  PQh = PQ^(-1/2)
-  println("done.\n")
+  timingstring=@elapsed PQh = PQ^(-1/2)
+  @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
 
-  println("Building 3idx matrices (P|mn)...")
-  @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
-  println("done.\n")
+  #Bmn = zeros(size(Pmn,1),size(Pmn,2),size(Pmn,3))
+  #for m = 1:size(Pmn,2), n = 1:size(Pmn,2)
+  #  for P = 1:size(Pmn,1), Q = 1:size(Pmn,1)
+  #    Bmn[Q,m,n] = Pmn[P,m,n] * PQh[Q,P]
+  #  end
+  #end
+  #println("Sizes: ",size(Pmn),size(PQh))
+  timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
+  @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
   if lDFdebug == true
-    println("Building 4idx matrices (mn|kl) from (P|mn)...")
-    @tensor eri2[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
-    println("done.\n")
+    timingstring=@elapsed @tensor eri2[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
+    @printf("Time needed to construct (mn|kl) from (P|mn):  %.4f s\n",timingstring)
   end
 
 
   #CORE GUESS
-  #build S, T, V, and I in AO Basis (for core guess)
-  println("Building Overlap matrix S...")
+  #build S, T and V in AO Basis (for core guess)
   S = Lints.make_S(bas)
-  println("built S")
-  println("Building kinetic matrix T...")
   T = Lints.make_T(bas)
-  println("built T")
-  println("Building Vne matrix V...")
   V = Lints.make_V(bas)
-  println("built V\n")
-  if leri4 == true
-    println("Building 4 index integral matrix...")
-    I = Lints.make_ERI4(bas)
-    println("done.\n")
-  end #if leri4
 
 end #lints
 
   nao = size(S,1)
+  naux = size(Bmn,1)
   nmo = size(S,1)
   nvir = nmo - nocc
-  println("\n nMO:",nmo)
-  println("nocc:",nocc)
-  println("nvir:",nvir)
-  println("")
+  @printf("\nnMO: %d\n",nmo)
+  @printf("nocc: %d\n",nocc)
+  @printf("nvir: %d\n",nvir)
+  @printf("naux: %d\n",naux)
 
   #build inverse of overlap
-  println("Building S^{-1/2}...")
   Sh = S^(-1/2)
-  println("done.")
   H  = T .+ V
   F  = deepcopy(H) 
   Ftinit = Sh*F*transpose(Sh) 
@@ -165,13 +149,18 @@ end #lints
 
   Dao = zeros(nao,nao)
   F   = zeros(nao,nao)
+  Jti = zeros(naux)
+  J   = zeros(nao,nao)
+  K1  = zeros(naux,nao,nocc)
+  K   = zeros(nao,nao)
 
   maxit = 100
   #RHF LOOP
   hfenfile=open("hf_energy","a+")
   Ftit = zeros(nao,nao)
-  println("HF It.  |  HF-Energy  |    dE    |   dD  ")
-  println("-----------------------------------------")
+  @printf("\n")
+  @printf("HF It.  |  HF-Energy  |    dE    |   dD  \n")
+  @printf("-----------------------------------------\n")
   while ite < maxit
     global Ftinit,Dold,Eold,dE,Drms,Vnuc,Ftit
     global eps,Cocc,Dao,F,E,converged,F
@@ -192,27 +181,29 @@ end #lints
     Dold = deepcopy(Dao)
 
     #Build the Fock matrix
-    #println("Building the new Fock matrix...")
-    @tensor F[m,n] = H[m,n] + Dao[k,l]*( (Bmn[P,m,n]*Bmn[P,k,l]) - 0.5*(Bmn[Q,m,l]*Bmn[Q,k,n]) )
-    #@tensor begin
-    #  G[m,n] := Dao[k,l] * (Bmn[Q,m,n]*Bmn[Q,k,l])
-    #  G[m,n] = G[m,n] - 0.5 * (Dao[k,l] * (Bmn[Q,m,l]*Bmn[Q,k,n]))
-    #  F[m,n] = H[m,n] + G[m,n]
-    #end
+    #@printf("Building the new Fock matrix...")
+    @tensor begin
+      Jti[P]    = Dao[k,l] * Bmn[P,k,l]
+      J[m,n]    = Bmn[P,m,n] * Jti[P]
+      K1[Q,m,c] = Cocc[r,c] * Bmn[Q,m,r]
+      K[k,l]    = K1[Q,k,p] * K1[Q,l,p] 
+      #F[m,n] = H[m,n] + Dao[k,l]*( (Bmn[P,m,n]*Bmn[P,k,l]) - 0.5*(Bmn[Q,m,l]*Bmn[Q,k,n]) )
+      #F[m,n] = H[m,n] + J[m,n] - 0.5 * Dao[k,l]*(Bmn[Q,m,l]*Bmn[Q,k,n])
+      F[m,n] = H[m,n] + J[m,n] - K[m,n]
+    end
     
-    #println("done.\n")
+    #@printf("done.\n")
     Ftit = Sh*F*transpose(Sh)
-
 
     E = 0.5*sum(Dao .* ( H .+ F ))
     if ite > 1
       dE = E - Eold
     end
     Eold = E
-    #println("HF Energy:         ",E+Vnuc)
-    #println("Energy Difference: ",dE)
+    #@printf("HF Energy:         ",E+Vnuc)
+    #@printf("Energy Difference: ",dE)
     @printf("  %3d   |  %.5f | %.2e | %.2e\n",ite,E+Vnuc,dE,Drms)
-    s = @sprintf("  %3d    %.5f  %.20f  %.20f\n",ite,E+Vnuc,dE,Drms)
+    s = @sprintf("  %3d    %.10f  %.15f  %.15f\n",ite,E+Vnuc,dE,Drms)
     write(hfenfile,s)
 
     if (abs(dE) < Ethr) & (Drms < Dthr) & (ite > 5)
