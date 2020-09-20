@@ -1,4 +1,5 @@
 include("physconsts.jl")
+include("misc.jl")
 
 using Lints
 using LinearAlgebra
@@ -8,12 +9,14 @@ using Test
 using Printf
 
 using .PhysConsts
-
+using .Misc
 
 
   leri4 = false
   lDFdebug = false
   molfile="mol.xyz"
+  #molfile="he.xyz"
+  #molfile="h2o.xyz"
   
   Ethr = 1.0E-6
   Dthr = 1.0E-6
@@ -36,16 +39,17 @@ using .PhysConsts
   
   nat = parse(Int,lines[1])
   
-  pos   = zeros(Float64,nat,3)
+  pos   = zeros(Float64,3,nat)
   charg = Array{Int}(undef,nat)
-  
+
   coord = [0.0, 0.0, 0.0]
   for i = 1:nat
     splitline = split(lines[i+2]," ")
     charg[i] = get(PhysConsts.atlist,splitline[1],0)
     popat!(splitline,1)
+    filter!(Misc.isempty,splitline)
     coord .= parse.(Float64,splitline)
-    pos[i,:] = collect(coord) * PhysConsts.angstrom_to_bohr
+    pos[:,i] = collect(coord) * PhysConsts.angstrom_to_bohr
   end
   @printf("Coordinates in bohr:\n")
   display(pos)
@@ -56,25 +60,35 @@ using .PhysConsts
   Vnuc = 0.0
   for i in 1:nat, j in 1:(i-1)
     global Vnuc
-    x = mol.coords[i,1] - mol.coords[j,1]
-    y = mol.coords[i,2] - mol.coords[j,2]
-    z = mol.coords[i,3] - mol.coords[j,3]
+    x = mol.coords[1,i] - mol.coords[1,j]
+    y = mol.coords[2,i] - mol.coords[2,j]
+    z = mol.coords[3,i] - mol.coords[3,j]
     Vnuc += (mol.atchrg[i]*mol.atchrg[j])/(sqrt(x*x + y*y + z*z))
   end
-  @printf("\nVnuc: %.5f\n\n",Vnuc)
+  @printf("\n\nVnuc: %.5f\n\n",Vnuc)
 
 @lints begin
 
   using Printf
 
   t_coord = Array{Array{Float64,1}}
-  t_coord = [mol.coords[i,:]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,1)]
+  t_coord = [mol.coords[:,i]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,2)]
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
 
-  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVDZ",lintmol)
+  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVQZ",lintmol)
   @printf("Time needed to construct basis:         %.4f s\n",timingstring)
-  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVDZ-RIFIT",lintmol)
+  
+  #build S, T and V in AO Basis (for core guess)
+  S = Lints.make_S(bas)
+  T = Lints.make_T(bas)
+  V = Lints.make_V(bas)
+
+  nao = size(S,1)
+  nmo = size(S,1)
+  nvir = nmo - nocc
+
+  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVQZ-RIFIT",lintmol)
   @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
@@ -87,17 +101,19 @@ using .PhysConsts
     @printf("Time needed to construct ERI4:          %.4f s\n",timingstring)
   end #if leri4
 
+  naux = size(Pmn,1)
+
   #build inverse  (P|Q)^{-1/2}
   timingstring=@elapsed PQh = PQ^(-1/2)
   @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
-
-  #Bmn = zeros(size(Pmn,1),size(Pmn,2),size(Pmn,3))
-  #for m = 1:size(Pmn,2), n = 1:size(Pmn,2)
-  #  for P = 1:size(Pmn,1), Q = 1:size(Pmn,1)
-  #    Bmn[Q,m,n] = Pmn[P,m,n] * PQh[Q,P]
+  #Bmn = zeros(naux,nao,nao)
+  #for n = 1:nao, m = 1:nao
+  #  for P = 1:naux
+  #    for Q = 1:naux
+  #      Bmn[P,m,n] = PQh[P,Q] * Pmn[Q,m,n]
+  #    end
   #  end
   #end
-  #println("Sizes: ",size(Pmn),size(PQh))
   timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
   @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
   if lDFdebug == true
@@ -106,18 +122,9 @@ using .PhysConsts
   end
 
 
-  #CORE GUESS
-  #build S, T and V in AO Basis (for core guess)
-  S = Lints.make_S(bas)
-  T = Lints.make_T(bas)
-  V = Lints.make_V(bas)
 
 end #lints
 
-  nao = size(S,1)
-  naux = size(Bmn,1)
-  nmo = size(S,1)
-  nvir = nmo - nocc
   @printf("\nnMO: %d\n",nmo)
   @printf("nocc: %d\n",nocc)
   @printf("nvir: %d\n",nvir)
@@ -182,15 +189,14 @@ end #lints
 
     #Build the Fock matrix
     #@printf("Building the new Fock matrix...")
-    @tensor begin
+    tstring=@elapsed @tensor begin
       Jti[P]    = Dao[k,l] * Bmn[P,k,l]
       J[m,n]    = Bmn[P,m,n] * Jti[P]
       K1[Q,m,c] = Cocc[r,c] * Bmn[Q,m,r]
       K[k,l]    = K1[Q,k,p] * K1[Q,l,p] 
-      #F[m,n] = H[m,n] + Dao[k,l]*( (Bmn[P,m,n]*Bmn[P,k,l]) - 0.5*(Bmn[Q,m,l]*Bmn[Q,k,n]) )
-      #F[m,n] = H[m,n] + J[m,n] - 0.5 * Dao[k,l]*(Bmn[Q,m,l]*Bmn[Q,k,n])
       F[m,n] = H[m,n] + J[m,n] - K[m,n]
     end
+    @printf("Time needed to calculate Fock matrix: %.4f s\n",tstring)
     
     #@printf("done.\n")
     Ftit = Sh*F*transpose(Sh)
