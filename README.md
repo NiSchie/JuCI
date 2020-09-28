@@ -17,6 +17,8 @@ TODO:
 4. Properties (Dip. Moment)
 5. CASCI Implementation
 6. CASSCF Implementation
+7. Integral Prescreening (Schwartz' Inequality)
+
 X. XCFun for DFT?
 
 

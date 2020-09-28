@@ -1,5 +1,7 @@
 include("physconsts.jl")
 include("misc.jl")
+include("scf.jl")
+include("settings.jl")
 
 using Lints
 using LinearAlgebra
@@ -7,19 +9,27 @@ using TensorOperations
 using LoopVectorization
 using Test
 using Printf
+using Plots
 
 using .PhysConsts
 using .Misc
+using .Settings
 
 
-  leri4 = false
+  #setting standard values if no config file is present
+  sett = deepcopy(Settings.sett_init)
+  display(sett)
+  @printf("\n")
+
   lDFdebug = false
-  molfile="mol.xyz"
-  #molfile="he.xyz"
-  #molfile="h2o.xyz"
-  
-  Ethr = 1.0E-6
-  Dthr = 1.0E-6
+  Ethr = 1.0 * 10^(-parse(Float64,sett["econv"]))
+  Dthr = 1.0 * 10^(-parse(Float64,sett["denconv"]))
+
+  @printf("\n")
+  @printf("SCF Econv:   %.1e\n",Ethr)
+  @printf("SCF Denconv: %.1e\n",Ethr)
+  @printf("\n")
+
   
   struct molecule
     nat::Int
@@ -28,11 +38,13 @@ using .Misc
     atchrg::Vector{Int}
   end
   
+  AOint = Dict()
+  
   #Read in molecule and set up basis sets
   
   @printf("Reading in the molecule\n")
-  if isfile(molfile)
-    lines = readlines(molfile)
+  if isfile(sett["molfile"])
+    lines = readlines(sett["molfile"])
   else
     throw("Molecule file not found")
   end
@@ -67,6 +79,7 @@ using .Misc
   end
   @printf("\n\nVnuc: %.5f\n\n",Vnuc)
 
+
 @lints begin
 
   using Printf
@@ -76,7 +89,7 @@ using .Misc
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
 
-  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVQZ",lintmol)
+  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVDZ",lintmol)
   @printf("Time needed to construct basis:         %.4f s\n",timingstring)
   
   #build S, T and V in AO Basis (for core guess)
@@ -88,7 +101,7 @@ using .Misc
   nmo = size(S,1)
   nvir = nmo - nocc
 
-  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVQZ-RIFIT",lintmol)
+  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVDZ-JKFIT",lintmol)
   @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
@@ -96,7 +109,8 @@ using .Misc
   @printf("Time needed to construct ERI2:          %.4f s\n",timingstring)
   timingstring=@elapsed Pmn = Lints.make_ERI3(bas,bas_df)
   @printf("Time needed to construct ERI3:          %.4f s\n",timingstring)
-  if leri4 == true
+
+  if get(sett,"DF","false") == "false"
     timingstring=@elapsed mnkl = Lints.make_ERI4(bas)
     @printf("Time needed to construct ERI4:          %.4f s\n",timingstring)
   end #if leri4
@@ -106,24 +120,24 @@ using .Misc
   #build inverse  (P|Q)^{-1/2}
   timingstring=@elapsed PQh = PQ^(-1/2)
   @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
-  #Bmn = zeros(naux,nao,nao)
-  #for n = 1:nao, m = 1:nao
-  #  for P = 1:naux
-  #    for Q = 1:naux
-  #      Bmn[P,m,n] = PQh[P,Q] * Pmn[Q,m,n]
-  #    end
-  #  end
-  #end
   timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
   @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
   if lDFdebug == true
-    timingstring=@elapsed @tensor eri2[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
+    timingstring=@elapsed @tensor eri4[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
     @printf("Time needed to construct (mn|kl) from (P|mn):  %.4f s\n",timingstring)
   end
-
-
+  #
+  #Fill AOintegrals Dict with Pointers to the ao integrals
+  push!(AOint,"S" => S)
+  push!(AOint,"T" => T)
+  push!(AOint,"V" => V)
+  push!(AOint,"B" => PQ)
+  if (sett["DF"] == "false")
+    push!(AOint,"ERI4" => mnkl)
+  end
 
 end #lints
+
 
   @printf("\nnMO: %d\n",nmo)
   @printf("nocc: %d\n",nocc)
@@ -131,8 +145,9 @@ end #lints
   @printf("naux: %d\n",naux)
 
   #build inverse of overlap
-  Sh = S^(-1/2)
-  H  = T .+ V
+  Sh = AOint["S"]^(-1/2)
+  H  = AOint["T"] .+ AOint["V"]
+  push!(AOint,"H" => H)
   F  = deepcopy(H) 
   Ftinit = Sh*F*transpose(Sh) 
 
@@ -145,40 +160,36 @@ end #lints
   Cocc = Cinit[:,1:nocc]
   @tensor Dold[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p] 
 
-  ite = 1
-  E = 0.0
-  dE = 1.0
-  Eold = 1.0E20
-  Drms = 1.0
+  Eold = 0.5*sum(Dold .* ( H .+ F ))
+
+  scf(Cinit,Bmn,Sh)
+
+  dE = 0.0
+  Drms = 0.0
   #diis = false
   #damp = 0.0
   converged = false
 
-  Dao = zeros(nao,nao)
   F   = zeros(nao,nao)
   Jti = zeros(naux)
   J   = zeros(nao,nao)
   K1  = zeros(naux,nao,nocc)
   K   = zeros(nao,nao)
+  C   = deepcopy(Cinit)
 
   maxit = 100
   #RHF LOOP
   hfenfile=open("hf_energy","a+")
   Ftit = zeros(nao,nao)
+  SCFEN = Array{Float64,1}()
   @printf("\n")
-  @printf("HF It.  |  HF-Energy  |    dE    |   dD  \n")
+  @printf("HF It.  |  HF-Energy  |abs(dE)   |abs(dD)\n")
   @printf("-----------------------------------------\n")
-  while ite < maxit
-    global Ftinit,Dold,Eold,dE,Drms,Vnuc,Ftit
-    global eps,Cocc,Dao,F,E,converged,F
+  @printf(" GUESS  |  %.5f | %.2e | %.2e\n",Eold+Vnuc,dE,Drms)
+  for ite = 1:maxit
+    global Dold,Eold,dE,Drms,Vnuc,Ftit,C
+    global eps,Cocc,F,converged,F,Eold,SCFEN
 
-    if ite == 1
-      Ftit = deepcopy(Ftinit)
-    end
-
-    #Get new orb energies and coeff
-    eps,Ct = eigen(Hermitian(real.(Ftit)))
-    C = Sh * Ct
 
     #new density matrix
     Cocc = C[:,1:nocc]
@@ -194,22 +205,21 @@ end #lints
       J[m,n]    = Bmn[P,m,n] * Jti[P]
       K1[Q,m,c] = Cocc[r,c] * Bmn[Q,m,r]
       K[k,l]    = K1[Q,k,p] * K1[Q,l,p] 
-      F[m,n] = H[m,n] + J[m,n] - K[m,n]
+      F[m,n]    = H[m,n] + J[m,n] - K[m,n]
     end
-    @printf("Time needed to calculate Fock matrix: %.4f s\n",tstring)
-    
-    #@printf("done.\n")
     Ftit = Sh*F*transpose(Sh)
+    
+    #Get new orb energies and coeff
+    eps,Ct = eigen(Hermitian(real.(Ftit)))
+    C = Sh * Ct
 
     E = 0.5*sum(Dao .* ( H .+ F ))
-    if ite > 1
-      dE = E - Eold
-    end
+    dE = E - Eold
     Eold = E
-    #@printf("HF Energy:         ",E+Vnuc)
-    #@printf("Energy Difference: ",dE)
-    @printf("  %3d   |  %.5f | %.2e | %.2e\n",ite,E+Vnuc,dE,Drms)
-    s = @sprintf("  %3d    %.10f  %.15f  %.15f\n",ite,E+Vnuc,dE,Drms)
+    push!(SCFEN,E+Vnuc)
+
+    @printf("  %3d   |  %.5f | %.2e | %.2e\n",ite,E+Vnuc,abs(dE),Drms)
+    s = @sprintf("  %3d    %.10f  %.15f  %.15f\n",ite,E+Vnuc,abs(dE),Drms)
     write(hfenfile,s)
 
     if (abs(dE) < Ethr) & (Drms < Dthr) & (ite > 5)
@@ -217,7 +227,11 @@ end #lints
       break
     end
 
-    global ite +=1
   end #ite < maxit
+
+  if(false)
+    scfenplot = plot(SCFEN)
+    png(scfenplot,"scfenergy.png")
+  end 
 
   close(hfenfile)
