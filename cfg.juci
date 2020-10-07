@@ -1,0 +1,5 @@
+basis   cc-pVDZ
+molfile mol.xyz
+econv   7
+denconv 7
+rijk    true

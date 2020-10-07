@@ -1,7 +1,7 @@
 module Settings
 
  const sett_init = Dict(
-    "DF"      => "true",
+    "rijk"    => "true",
     "econv"   => "6",
     "denconv" => "6",
     "molfile" => "mol.xyz",

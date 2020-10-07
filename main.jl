@@ -9,15 +9,25 @@ using TensorOperations
 using LoopVectorization
 using Test
 using Printf
-using Plots
+#using Plots
 
 using .PhysConsts
 using .Misc
 using .Settings
 
 
-  #setting standard values if no config file is present
+  #load settings
   sett = deepcopy(Settings.sett_init)
+  if isfile("cfg.juci")
+    @printf("Configuration file found.\n")
+    for ln in eachline("cfg.juci")
+      splitline = split(ln," ")
+      filter!(Misc.isempty,splitline)
+      sett[splitline[1]] = splitline[2]
+    end
+  else
+    @printf("NO CONFIGURATION FILE FOUND, using standard config (HF calculation, 10^-6, cc-pVDZ).\n")
+  end
   display(sett)
   @printf("\n")
 
@@ -50,7 +60,6 @@ using .Settings
   end
   
   nat = parse(Int,lines[1])
-  
   pos   = zeros(Float64,3,nat)
   charg = Array{Int}(undef,nat)
 
@@ -110,7 +119,7 @@ using .Settings
   timingstring=@elapsed Pmn = Lints.make_ERI3(bas,bas_df)
   @printf("Time needed to construct ERI3:          %.4f s\n",timingstring)
 
-  if get(sett,"DF","false") == "false"
+  if sett["rijk"] == "false"
     timingstring=@elapsed mnkl = Lints.make_ERI4(bas)
     @printf("Time needed to construct ERI4:          %.4f s\n",timingstring)
   end #if leri4
@@ -132,7 +141,7 @@ using .Settings
   push!(AOint,"T" => T)
   push!(AOint,"V" => V)
   push!(AOint,"B" => PQ)
-  if (sett["DF"] == "false")
+  if (sett["rijk"] == "false")
     push!(AOint,"ERI4" => mnkl)
   end
 
