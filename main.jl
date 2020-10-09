@@ -130,6 +130,7 @@ using .Settings
   #build inverse  (P|Q)^{-1/2}
   @printf("Type of PQ:  %s\n",typeof(PQ))
   timingstring=@elapsed PQh = PQ^(-1/2)
+  PQh = Matrix(PQh)
   @printf("Type of PQh: %s\n",typeof(PQh))
   @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
   timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
