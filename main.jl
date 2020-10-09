@@ -15,6 +15,7 @@ using .PhysConsts
 using .Misc
 using .Settings
 
+@printf("Number of threads used: %d\n",Threads.nthreads())
 
   #load settings
   sett = deepcopy(Settings.sett_init)
@@ -67,8 +68,8 @@ using .Settings
   for i = 1:nat
     splitline = split(lines[i+2]," ")
     charg[i] = get(PhysConsts.atlist,splitline[1],0)
-    popat!(splitline,1)
     filter!(Misc.isempty,splitline)
+    popat!(splitline,1)
     coord .= parse.(Float64,splitline)
     pos[:,i] = collect(coord) * PhysConsts.angstrom_to_bohr
   end
@@ -127,9 +128,19 @@ using .Settings
   naux = size(Pmn,1)
 
   #build inverse  (P|Q)^{-1/2}
+  @printf("Type of PQ:  %s\n",typeof(PQ))
   timingstring=@elapsed PQh = PQ^(-1/2)
+  @printf("Type of PQh: %s\n",typeof(PQh))
   @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
   timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
+  #Bmn = zeros(naux,nao,nao)
+  #for n = 1:nao, m = 1:nao
+  #  for Q = 1:naux
+  #    for P = 1:naux
+  #      Bmn[Q,m,n] += Pmn[P,m,n] * PQh[P,Q]
+  #    end
+  #  end
+  #end
   @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
   if lDFdebug == true
     timingstring=@elapsed @tensor eri4[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
@@ -190,14 +201,20 @@ end #lints
   #RHF LOOP
   hfenfile=open("hf_energy","a+")
   Ftit = zeros(nao,nao)
+  Fold = zeros(nao,nao)
   SCFEN = Array{Float64,1}()
+  dfac  = 0.4
+  dstep = 0.1
+  dmax  = 0.9
+  scfdamp = true
   @printf("\n")
   @printf("HF It.  |  HF-Energy  |abs(dE)   |abs(dD)\n")
   @printf("-----------------------------------------\n")
   @printf(" GUESS  |  %.5f | %.2e | %.2e\n",Eold+Vnuc,dE,Drms)
   for ite = 1:maxit
-    global Dold,Eold,dE,Drms,Vnuc,Ftit,C
+    global Dold,Eold,dE,Drms,Vnuc,Ftit,Fold,C
     global eps,Cocc,F,converged,F,Eold,SCFEN
+    global dfac,dstep,dmax,scfdamp
 
 
     #new density matrix
@@ -210,14 +227,23 @@ end #lints
     #Build the Fock matrix
     #@printf("Building the new Fock matrix...")
     tstring=@elapsed @tensor begin
-      Jti[P]    = Dao[k,l] * Bmn[P,k,l]
+      Jti[P]    = Dao[k,l]   * Bmn[P,k,l]
       J[m,n]    = Bmn[P,m,n] * Jti[P]
-      K1[Q,m,c] = Cocc[r,c] * Bmn[Q,m,r]
-      K[k,l]    = K1[Q,k,p] * K1[Q,l,p] 
+      K1[Q,m,c] = Cocc[r,c]  * Bmn[Q,m,r]
+      K[m,n]    = K1[Q,m,p]  * K1[Q,n,p] 
       F[m,n]    = H[m,n] + J[m,n] - K[m,n]
     end
-    Ftit = Sh*F*transpose(Sh)
-    
+    Fold = deepcopy(F)
+    if(scfdamp)
+      Fd = dfac*F + (1.0-dfac)*Fold
+      if (dfac < (dmax-dstep)) 
+        dfac = dfac + dstep
+      end
+      Ftit = Sh*Fd*transpose(Sh)
+    else
+      Ftit = Sh*F*transpose(Sh)
+    end
+
     #Get new orb energies and coeff
     eps,Ct = eigen(Hermitian(real.(Ftit)))
     C = Sh * Ct
