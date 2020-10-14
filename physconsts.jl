@@ -1,7 +1,7 @@
 module PhysConsts
 
 bohr_to_angstrom = 0.529177210670000
-angstrom_to_bohr = 1/bohr_to_angstrom
+angstrom_to_bohr = 1.0/bohr_to_angstrom
 
 hartree_to_kcalmol = 627.509474
 hartree_to_kjmol = 2625.49964

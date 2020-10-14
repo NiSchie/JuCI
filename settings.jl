@@ -5,7 +5,8 @@ module Settings
     "econv"   => "6",
     "denconv" => "6",
     "molfile" => "mol.xyz",
-    "basis"   => "cc-pVDZ"
+    "bas"     => "cc-pVDZ",
+    "dfbas"   => "cc-pVDZ-JKFIT"
  )
 
 end #module Settings

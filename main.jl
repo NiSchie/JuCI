@@ -1,6 +1,5 @@
 include("physconsts.jl")
 include("misc.jl")
-include("scf.jl")
 include("settings.jl")
 
 using Lints
@@ -64,14 +63,14 @@ using .Settings
   pos   = zeros(Float64,3,nat)
   charg = Array{Int}(undef,nat)
 
-  coord = [0.0, 0.0, 0.0]
   for i = 1:nat
+    coord = [0.0, 0.0, 0.0]
     splitline = split(lines[i+2]," ")
     charg[i] = get(PhysConsts.atlist,splitline[1],0)
     filter!(Misc.isempty,splitline)
     popat!(splitline,1)
     coord .= parse.(Float64,splitline)
-    pos[:,i] = collect(coord) * PhysConsts.angstrom_to_bohr
+    pos[:,i] = collect(coord) .* PhysConsts.angstrom_to_bohr
   end
   @printf("Coordinates in bohr:\n")
   display(pos)
@@ -99,7 +98,7 @@ using .Settings
 
   lintmol = Lints.Molecule(mol.atchrg,t_coord)
 
-  timingstring=@elapsed bas    = Lints.BasisSet("cc-pVDZ",lintmol)
+  timingstring=@elapsed bas    = Lints.BasisSet(sett["bas"],lintmol)
   @printf("Time needed to construct basis:         %.4f s\n",timingstring)
   
   #build S, T and V in AO Basis (for core guess)
@@ -111,7 +110,7 @@ using .Settings
   nmo = size(S,1)
   nvir = nmo - nocc
 
-  timingstring=@elapsed bas_df = Lints.BasisSet("cc-pVDZ-JKFIT",lintmol)
+  timingstring=@elapsed bas_df = Lints.BasisSet(sett["dfbas"],lintmol)
   @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
 
   #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
@@ -128,23 +127,17 @@ using .Settings
   naux = size(Pmn,1)
 
   #build inverse  (P|Q)^{-1/2}
-  @printf("Type of PQ:  %s\n",typeof(PQ))
+  PQh = zeros(naux,naux)
   timingstring=@elapsed PQh = PQ^(-1/2)
-  PQh = Matrix(PQh)
-  @printf("Type of PQh: %s\n",typeof(PQh))
+  PQh = real(Matrix(PQh))
   @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
-  timingstring=@elapsed @tensor Bmn[Q,m,n] := Pmn[P,m,n] * PQh[P,Q]
-  #Bmn = zeros(naux,nao,nao)
-  #for n = 1:nao, m = 1:nao
-  #  for Q = 1:naux
-  #    for P = 1:naux
-  #      Bmn[Q,m,n] += Pmn[P,m,n] * PQh[P,Q]
-  #    end
-  #  end
-  #end
+  Bmn = zeros(naux,nao,nao)
+  timingstring=@elapsed @tensor Bmn[Q,m,n] = Pmn[P,m,n] * PQh[P,Q]
   @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
+
   if lDFdebug == true
-    timingstring=@elapsed @tensor eri4[m,n,k,l] := Bmn[Q,m,n]*Bmn[Q,k,l]
+    eri4 = zeros(nao,nao,nao,nao)
+    timingstring=@elapsed @tensor eri4[m,n,k,l] = Bmn[Q,m,n]*Bmn[Q,k,l]
     @printf("Time needed to construct (mn|kl) from (P|mn):  %.4f s\n",timingstring)
   end
   #
@@ -152,7 +145,7 @@ using .Settings
   push!(AOint,"S" => S)
   push!(AOint,"T" => T)
   push!(AOint,"V" => V)
-  push!(AOint,"B" => PQ)
+  push!(AOint,"B" => Bmn)
   if (sett["rijk"] == "false")
     push!(AOint,"ERI4" => mnkl)
   end
@@ -165,25 +158,30 @@ end #lints
   @printf("nvir: %d\n",nvir)
   @printf("naux: %d\n",naux)
 
+  AOops = Dict()
+
   #build inverse of overlap
   Sh = AOint["S"]^(-1/2)
   H  = AOint["T"] .+ AOint["V"]
-  push!(AOint,"H" => H)
+  push!(AOops,"H" => H)
   F  = deepcopy(H) 
+  push!(AOops,"F" => F)
   Ftinit = Sh*F*transpose(Sh) 
 
   #diagonalize Ft
-  eps,Ctinit = eigen(Hermitian(Ftinit))
+  #eps,Ctinit = eigen(Hermitian(real.(Ftinit)))
+  eps,Ctinit = eigen(Hermitian(real.(F)))
 
   #transform Ct with Sh to get MO-coefficients
   Cinit = Sh*Ctinit
 
   Cocc = Cinit[:,1:nocc]
-  @tensor Dold[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p] 
+  Dold = zeros(nao,nao)
+  @tensor Dold[m,n] = 2.0 * Cocc[m,p] * Cocc[n,p] 
 
   Eold = 0.5*sum(Dold .* ( H .+ F ))
 
-  scf(Cinit,Bmn,Sh)
+  #scf(Cinit,Bmn,Sh)
 
   dE = 0.0
   Drms = 0.0
@@ -200,27 +198,29 @@ end #lints
 
   maxit = 100
   #RHF LOOP
+  rm("hf_energy")
   hfenfile=open("hf_energy","a+")
   Ftit = zeros(nao,nao)
   Fold = zeros(nao,nao)
   SCFEN = Array{Float64,1}()
-  dfac  = 0.4
+  dfac  = 0.2
   dstep = 0.1
   dmax  = 0.9
   scfdamp = true
+
+  Dao = zeros(nao,nao)
   @printf("\n")
   @printf("HF It.  |  HF-Energy  |abs(dE)   |abs(dD)\n")
   @printf("-----------------------------------------\n")
-  @printf(" GUESS  |  %.5f | %.2e | %.2e\n",Eold+Vnuc,dE,Drms)
   for ite = 1:maxit
-    global Dold,Eold,dE,Drms,Vnuc,Ftit,Fold,C
+    global Dold,Eold,dE,Drms,Vnuc,Ftit,Fold,C,Dao
     global eps,Cocc,F,converged,F,Eold,SCFEN
     global dfac,dstep,dmax,scfdamp
 
 
     #new density matrix
     Cocc = C[:,1:nocc]
-    @tensor Dao[m,n] := 2.0 * Cocc[m,p] * Cocc[n,p]
+    @tensor Dao[m,n] = 2.0 * Cocc[m,p] * Cocc[n,p]
     dD = Dao .- Dold
     Drms = sqrt(sum(dD.^2))
     Dold = deepcopy(Dao)
@@ -246,13 +246,16 @@ end #lints
     end
 
     #Get new orb energies and coeff
-    eps,Ct = eigen(Hermitian(real.(Ftit)))
+    #eps,Ct = eigen(Hermitian(real.(Ftit)))
+    eps,Ct = eigen(Hermitian(real.(F)))
     C = Sh * Ct
 
     E = 0.5*sum(Dao .* ( H .+ F ))
     dE = E - Eold
     Eold = E
-    push!(SCFEN,E+Vnuc)
+    if(false) 
+      push!(SCFEN,E+Vnuc)
+    end
 
     @printf("  %3d   |  %.5f | %.2e | %.2e\n",ite,E+Vnuc,abs(dE),Drms)
     s = @sprintf("  %3d    %.10f  %.15f  %.15f\n",ite,E+Vnuc,abs(dE),Drms)
