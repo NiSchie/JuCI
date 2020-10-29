@@ -4,7 +4,7 @@ module config
 
   export set_config,sett
 
-  function set_config()
+  function set_config(sett::Dict())
 
     sett_init = Dict(
       "rijk"    => "true",

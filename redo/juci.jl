@@ -1,6 +1,5 @@
 module juci
 
-include("config.jl")
 include("setup.jl")
 
 
