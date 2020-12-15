@@ -178,6 +178,7 @@
   @tensor Dold[m,n] = 2.0 * Cocc[m,p] * Cocc[n,p] 
   
   Eold = 0.5*sum(Dold .* ( H .+ F ))
+  println("E guess: ",Eold)
   
   #scf(Cinit,Bmn,Sh)
   

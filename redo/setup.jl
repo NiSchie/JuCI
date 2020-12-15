@@ -1,5 +1,3 @@
-using Printf
-
 function setup()
 
   settings = set_config()
@@ -17,7 +15,8 @@ function set_config()
     "denconv" => "6",
     "molfile" => "mol.xyz",
     "bas"     => "cc-pVDZ",
-    "dfbas"   => "cc-pVDZ-JKFIT"
+    "dfbas"   => "cc-pVDZ-JKFIT",
+    "hfmaxit" => "100"
   )
 
   #load settings

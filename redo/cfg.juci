@@ -3,4 +3,5 @@ dfbas   cc-pVDZ-JKFIT
 econv   5
 denconv 5
 rijk    true
-molfile uracil.xyz
+molfile h2o.xyz
+hfmaxit 10

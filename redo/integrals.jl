@@ -1,10 +1,8 @@
-function integrals(sett,bas)
+function get_ints(mol,sett)
 
   @lints begin
 
-    using Printf
-  
-    t_coord = Array{Array{Float64,1}}
+    #t_coord = Array{Array{Float64,1}}
     t_coord = [mol.coords[:,i]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,2)]
   
     lintmol = Lints.Molecule(mol.atchrg,t_coord)
@@ -17,9 +15,11 @@ function integrals(sett,bas)
     T = Lints.make_T(bas)
     V = Lints.make_V(bas)
   
-    nao = size(S,1)
-    nmo = size(S,1)
-    nvir = nmo - nocc
+    dims = Dict()
+    push!(dims,"nao"  => size(S,1)              )
+    push!(dims,"nmo"  => size(S,1)              )
+    push!(dims,"nocc" => Int(sum(mol.atchrg)/2) )
+    push!(dims,"nvir" => dims["nmo"] - dims["nocc"]             )
   
     timingstring=@elapsed bas_df = Lints.BasisSet(sett["dfbas"],lintmol)
     @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
@@ -42,17 +42,12 @@ function integrals(sett,bas)
     timingstring=@elapsed PQh = PQ^(-1/2)
     PQh = real(Matrix(PQh))
     @printf("Time needed to construct (P|Q)^{-1/2}:  %.4f s\n",timingstring)
-    Bmn = zeros(naux,nao,nao)
+    Bmn = zeros(naux,dims["nao"],dims["nao"])
     timingstring=@elapsed @tensor Bmn[Q,m,n] = Pmn[P,m,n] * PQh[P,Q]
     @printf("Time needed to construct (P|mn):        %.4f s\n",timingstring)
   
-    if lDFdebug == true
-      eri4 = zeros(nao,nao,nao,nao)
-      timingstring=@elapsed @tensor eri4[m,n,k,l] = Bmn[Q,m,n]*Bmn[Q,k,l]
-      @printf("Time needed to construct (mn|kl) from (P|mn):  %.4f s\n",timingstring)
-    end
-    #
     #Fill AOintegrals Dict with Pointers to the ao integrals
+    AOint = Dict()
     push!(AOint,"S" => S)
     push!(AOint,"T" => T)
     push!(AOint,"V" => V)
@@ -62,6 +57,8 @@ function integrals(sett,bas)
     end
     
 
-  @lints end
+  end #lints
 
-  return AOint
+  return AOint,dims
+
+end #function integrals
