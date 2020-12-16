@@ -54,9 +54,6 @@ function rhf()
      
   end #ite
   
-  println("TURBOMOLE cc-pVDZ RIJK HF calculation of h2o:")
-  println("|  total energy      =    -76.01678545283  |")
-
 end #function rhf
 
 

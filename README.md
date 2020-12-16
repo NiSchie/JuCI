@@ -10,9 +10,7 @@ We'll see what happens next.
 
 TODO:
 
-0. Implement canonical orthogonalization (X = Us^(-1/2)), symmetric orth. does not work reliably
-1. Harmonize coding style
-2. Split code in different functions and files
+0. Fix oscillation bug 
 4. Properties (Dip. Moment)
 5. CASCI Implementation
 6. CASSCF Implementation
