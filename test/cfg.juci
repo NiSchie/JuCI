@@ -1,7 +1,10 @@
 bas     cc-pVDZ
 dfbas   cc-pVDZ-JKFIT
-econv   5
-denconv 5
+econv   6
+denconv 6
 rijk    true
 molfile uracil.xyz
 hfmaxit 100
+hfdampfac  0.1 
+hfdampstp  0.1 
+hfdampend  0.8

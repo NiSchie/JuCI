@@ -16,7 +16,10 @@ function set_config()
     "molfile" => "mol.xyz",
     "bas"     => "cc-pVDZ",
     "dfbas"   => "cc-pVDZ-JKFIT",
-    "hfmaxit" => "100"
+    "hfmaxit" => "100",
+    "hfdampfac"  => "0.2",
+    "hfdampstp"  => "0.1",
+    "hfdampend"  => "0.8"
   )
 
   #load settings
