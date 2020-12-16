@@ -4,4 +4,4 @@ econv   5
 denconv 5
 rijk    true
 molfile h2o.xyz
-hfmaxit 10
+hfmaxit 100
