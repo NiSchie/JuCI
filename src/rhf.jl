@@ -79,8 +79,8 @@ function build_AOops(AOint)
   for i in 1:size(s,1)
     s[i] = 1.0/sqrt(s[i])
   end
-  for i in 1:size(U,1), j in 1:size(U,2)
-    X[i,j] = U[i,j] * s[j]
+  for i in 1:size(U,1)#, j in 1:size(U,2)
+    X[:,i] = U[:,i] * s[i]
   end #i,j
   push!(AOops,"X" => X)
 
