@@ -2,6 +2,7 @@ include("juci.jl")
 
 using Printf
 using TensorOperations
+using LinearAlgebra
 
 function rhf()
   sett = juci.set_config()
