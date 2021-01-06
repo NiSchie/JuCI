@@ -3,8 +3,10 @@ dfbas   cc-pVDZ-JKFIT
 econv   6
 denconv 6
 rijk    true
-molfile uracil.xyz
+molfile h2o.xyz
 hfmaxit 100
 hfdampfac  0.1 
 hfdampstp  0.1 
 hfdampend  0.8
+nact 4
+nel  2
