@@ -1,6 +1,5 @@
 function read_mol(molfile)
 
-
   @printf("Reading in the molecule\n")
   if isfile(molfile)
     lines = readlines(molfile)

@@ -1,6 +1,8 @@
 julia
 Julia Packages: 
   Lints 
+  libint_jll (for aarch64)
+  CxxWrap
   LinearAlgebra
   TensorOperations
   Test

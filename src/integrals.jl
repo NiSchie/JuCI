@@ -1,12 +1,16 @@
+module ints
+
+include("physconsts.jl")
+
+using Printf
+using Lints
+using TensorOperations
 
 function get_ints(mol,sett)
 
   @lints begin
 
-
-    #t_coord = Array{Array{Float64,1}}
     t_coord = [mol.coords[:,i]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,2)]
-  
     lintmol = Lints.Molecule(mol.atchrg,t_coord)
   
     timingstring=@elapsed bas    = Lints.BasisSet(sett["bas"],lintmol)
@@ -57,10 +61,10 @@ function get_ints(mol,sett)
     if (sett["rijk"] == "false")
       push!(AOint,"ERI4" => mnkl)
     end
-    
-
   end #lints
 
   return AOint,dims
 
 end #function integrals
+
+end #module ints
