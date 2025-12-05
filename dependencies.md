@@ -4,6 +4,7 @@ Julia Packages:
   # libint_jll (for aarch64)
   libcint_jll
   GaussianBasis
+  (Molecules)
   CxxWrap
   LinearAlgebra
   TensorOperations
