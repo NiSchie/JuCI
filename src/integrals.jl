@@ -17,9 +17,9 @@ function get_ints(mol,sett)
     @printf("Time needed to construct basis:         %.4f s\n",timingstring)
     
     #build S, T and V in AO Basis (for core guess)
-    S = Lints.make_S(bas)
-    T = Lints.make_T(bas)
-    V = Lints.make_V(bas)
+    S = Lints.make_S(bas) # GaussianBasis.overlap(bas)
+    T = Lints.make_T(bas) # GaussianBasis.kinetic(bas)
+    V = Lints.make_V(bas) # GaussianBasis.nuclear(bas)
   
     dims = Dict()
     push!(dims,"nao"  => size(S,1)              )
@@ -31,13 +31,13 @@ function get_ints(mol,sett)
     @printf("Time needed to construct DF basis:      %.4f s\n",timingstring)
   
     #generate AO integtals and AO-DF integrals (P|Q), (P|mn), (mn|kl)
-    timingstring=@elapsed PQ  = Lints.make_ERI2(bas_df)
+    timingstring=@elapsed PQ  = Lints.make_ERI2(bas_df) # aux bas, GaussianBasis.ERI_2e2c
     @printf("Time needed to construct ERI2:          %.4f s\n",timingstring)
-    timingstring=@elapsed Pmn = Lints.make_ERI3(bas,bas_df)
+    timingstring=@elapsed Pmn = Lints.make_ERI3(bas,bas_df) # rijk GaussianBasis.ERI_2e3c(bas, bas_df)
     @printf("Time needed to construct ERI3:          %.4f s\n",timingstring)
   
-    if sett["rijk"] == "false"
-      timingstring=@elapsed mnkl = Lints.make_ERI4(bas)
+    if sett["rijk"] == "false" 
+      timingstring=@elapsed mnkl = Lints.make_ERI4(bas) # GaussianBasis.ERI_2e4c(bas)
       @printf("Time needed to construct ERI4:          %.4f s\n",timingstring)
     end #if leri4
   
