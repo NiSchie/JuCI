@@ -13,7 +13,7 @@ function get_ints(mol,sett)
     t_coord = [mol.coords[:,i]*PhysConsts.bohr_to_angstrom for i in 1:size(mol.coords,2)]
     lintmol = Lints.Molecule(mol.atchrg,t_coord)
   
-    timingstring=@elapsed bas    = Lints.BasisSet(sett["bas"],lintmol)
+    timingstring=@elapsed bas    = Lints.BasisSet(sett["bas"],lintmol) #GaussianBasis.bas("sto-3g", Molecules.mol)
     @printf("Time needed to construct basis:         %.4f s\n",timingstring)
     
     #build S, T and V in AO Basis (for core guess)
